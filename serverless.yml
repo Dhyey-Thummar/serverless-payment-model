@@ -1,0 +1,17 @@
+service: serverless-payment-model
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.9
+  region: ap-south-1
+
+functions:
+  initTable:
+    handler: handler.initTable
+
+  getBalance:
+    handler: handler.getBalance
+
+  transfer:
+    handler: handler.transfer
