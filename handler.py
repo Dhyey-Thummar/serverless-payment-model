@@ -2,6 +2,10 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 import boto3
 import json
+import time
+
+MAX_RETRIES = 3
+RETRY_DELAY = 0.5  # Delay in seconds between retries
 
 def initTable(event, context):
     print("Creating table")
@@ -64,6 +68,53 @@ def getBalance(event, context):
         'body': 'user ' + user_id + ' has balance ' + str(balance)
     }
 
+def perform_transaction(sender, receiver, amount, sender_balance, receiver_balance):
+    client = boto3.client('dynamodb')
+    
+    for _ in range(MAX_RETRIES):
+        try:
+            response = client.transact_write_items(
+                TransactItems=[
+                    {
+                        'Update': {
+                            'TableName': 'users',
+                            'Key': {
+                                'id': {'S': sender}
+                            },
+                            'UpdateExpression': 'SET balance = :val1',
+                            'ExpressionAttributeValues': {
+                                ':val1': {'N': str(sender_balance)}
+                            }
+                        }
+                    },
+                    {
+                        'Update': {
+                            'TableName': 'users',
+                            'Key': {
+                                'id': {'S': receiver}
+                            },
+                            'UpdateExpression': 'SET balance = :val1',
+                            'ExpressionAttributeValues': {
+                                ':val1': {'N': str(receiver_balance)}
+                            }
+                        }
+                    }
+                ]
+            )
+            return True, response
+        
+        except client.exceptions.ProvisionedThroughputExceededException:
+            # If ProvisionedThroughputExceededException is raised, retry after delay
+            time.sleep(RETRY_DELAY)
+            continue
+        
+        except Exception as e:
+            # For other exceptions, return False and the exception message
+            return False, str(e)
+    
+    # If all retries fail
+    return False, "Failed to perform transaction after retries"
+
 def transfer(event, context):
     print("Transferring money")
     dynamodb = boto3.resource('dynamodb')
@@ -72,20 +123,35 @@ def transfer(event, context):
     sender = body['sender']
     receiver = body['receiver']
 
-    response = table.get_item( Key={'id': sender})
-    if 'Item' not in response:
+    # Get sender's balance
+    try:
+        response = table.get_item(Key={'id': sender})
+        if 'Item' not in response:
+            return {
+                'statusCode': 400,
+                'body': 'Sender not found'
+            }
+        sender_balance = response['Item']['balance']
+    except Exception as e:
         return {
-            'statusCode': 400,
-            'body': 'Sender not found'
+            'statusCode': 500,
+            'body': f"Failed to get sender's balance: {str(e)}"
         }
-    sender_balance = response['Item']['balance']
-    response = table.get_item( Key={'id': receiver})
-    if 'Item' not in response:
+
+    # Get receiver's balance
+    try:
+        response = table.get_item(Key={'id': receiver})
+        if 'Item' not in response:
+            return {
+                'statusCode': 400,
+                'body': 'Receiver not found'
+            }
+        receiver_balance = response['Item']['balance']
+    except Exception as e:
         return {
-            'statusCode': 400,
-            'body': 'Receiver not found'
+            'statusCode': 500,
+            'body': f"Failed to get receiver's balance: {str(e)}"
         }
-    receiver_balance = response['Item']['balance']
 
     amount = int(body['amount'])
     if amount <= 0:
@@ -93,49 +159,28 @@ def transfer(event, context):
             'statusCode': 400,
             'body': 'Amount should be greater than 0'
         }
+    
     if sender_balance < amount:
         return {
             'statusCode': 400,
             'body': 'Insufficient balance'
         }
     
+    # Update balances
     sender_balance -= amount
     receiver_balance += amount
 
-    # table.update_item( Key={'id': sender}, UpdateExpression='SET balance = :val1', ExpressionAttributeValues={':val1': sender_balance})
-    # table.update_item( Key={'id': receiver}, UpdateExpression='SET balance = :val1', ExpressionAttributeValues={':val1': receiver_balance})
-    client = boto3.client('dynamodb')
-    response = client.transact_write_items(
-        TransactItems=[
-            {
-                'Update': {
-                    'TableName': 'users',
-                    'Key': {
-                        'id': {'S'  : sender}
-                    },
-                    'UpdateExpression': 'SET balance = :val1',
-                    'ExpressionAttributeValues': {
-                        ':val1': {'N': str(sender_balance)}
-                    }
-                }
-            },
-            {
-                'Update': {
-                    'TableName': 'users',
-                    'Key': {
-                        'id': {'S': receiver}
-                    },
-                    'UpdateExpression': 'SET balance = :val1',
-                    'ExpressionAttributeValues': {
-                        ':val1': {'N': str(receiver_balance)}
-                    }
-                }
-            }
-        ]
-    )
-    # print(response)
-    message = 'Transfered ' + str(amount) + ' from ' + sender + ' to ' + receiver + '. New balance of ' + sender + ' is ' + str(sender_balance) + ' and of ' + receiver + ' is ' + str(receiver_balance)
-    return {
-        'statusCode': 200,
-        'body': message
-    }
+    # Perform transaction
+    success, response = perform_transaction(sender, receiver, amount, sender_balance, receiver_balance)
+    
+    if success:
+        message = f"Transferred {amount} from {sender} to {receiver}. New balance of {sender} is {sender_balance} and of {receiver} is {receiver_balance}"
+        return {
+            'statusCode': 200,
+            'body': message
+        }
+    else:
+        return {
+            'statusCode': 500,
+            'body': f"Transaction failed: {response}"
+        }
