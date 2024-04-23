@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from uuid import uuid4
+import uuid
 import boto3
 import json
 import time
@@ -68,7 +68,7 @@ def getBalance(event, context):
         'body': 'user ' + user_id + ' has balance ' + str(balance)
     }
 
-def perform_transaction(sender, receiver, amount, sender_balance, receiver_balance):
+def perform_transaction(sender, receiver, amount, sender_balance, receiver_balance, transaction_id):
     client = boto3.client('dynamodb')
     
     for _ in range(MAX_RETRIES):
@@ -101,6 +101,10 @@ def perform_transaction(sender, receiver, amount, sender_balance, receiver_balan
                     }
                 ]
             )
+            
+            # Update transaction status to "completed"
+            update_log_status(transaction_id, "completed")
+            
             return True, response
         
         except client.exceptions.ProvisionedThroughputExceededException:
@@ -110,10 +114,29 @@ def perform_transaction(sender, receiver, amount, sender_balance, receiver_balan
         
         except Exception as e:
             # For other exceptions, return False and the exception message
+            update_log_status(transaction_id, "failed")
             return False, str(e)
     
     # If all retries fail
+    update_log_status(transaction_id, "failed")
     return False, "Failed to perform transaction after retries"
+
+def update_log_status(transaction_id, status):
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table('logs')
+    
+    for _ in range(MAX_RETRIES):
+        try:
+            table.put_item(
+                Item={
+                    'transaction_id': transaction_id,
+                    'status': status
+                }
+            )
+            return
+        except Exception as e:
+            time.sleep(RETRY_DELAY)
+            continue
 
 def transfer(event, context):
     print("Transferring money")
@@ -122,6 +145,22 @@ def transfer(event, context):
     body = json.loads(event['body'])
     sender = body['sender']
     receiver = body['receiver']
+    transaction_id = body.get('transaction_id', str(uuid.uuid4()))  # Generate a new UUID if transactionID is not provided
+
+    # Check transaction status in logs table
+    dynamodb_logs = boto3.resource('dynamodb').Table('logs')
+    try:
+        response = dynamodb_logs.get_item(Key={'transaction_id': transaction_id})
+        if 'Item' in response and response['Item']['status'] == 'completed':
+            return {
+                'statusCode': 201,
+                'body': 'Transaction already processed' 
+            }
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': f"Failed to check transaction status: {str(e)}"
+        }
 
     # Get sender's balance
     try:
@@ -171,7 +210,7 @@ def transfer(event, context):
     receiver_balance += amount
 
     # Perform transaction
-    success, response = perform_transaction(sender, receiver, amount, sender_balance, receiver_balance)
+    success, response = perform_transaction(sender, receiver, amount, sender_balance, receiver_balance, transaction_id)
     
     if success:
         message = f"Transferred {amount} from {sender} to {receiver}. New balance of {sender} is {sender_balance} and of {receiver} is {receiver_balance}"

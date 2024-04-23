@@ -21,10 +21,12 @@ failedCount = 0
 for user in users:
     for amount in amounts:
         for _ in range(num_requests):
+            # transaction_id = str(user) +str(_) + str(amount) + str(_) + str(time.time())
             data = {
                 'sender': user,
                 'receiver': 'user5',  # Assuming user2 is always the receiver
-                'amount': amount
+                'amount': amount,
+                'transaction_id': "1234567890"
             }
             
             start_time = time.time()
@@ -38,6 +40,9 @@ for user in users:
             
             if response.status_code == 200:
                 # print(f"Transfer successful. Latency: {latency:.4f} seconds")
+                continue
+            elif response.status_code == 201:
+                print(f"Transaction already processed. Latency: {latency:.4f} seconds")
                 continue
             else:
                 # print(f"Transfer failed. Status code: {response.status_code}, Message: {response.text}")
