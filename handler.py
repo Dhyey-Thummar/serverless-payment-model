@@ -102,9 +102,38 @@ def transfer(event, context):
     sender_balance -= amount
     receiver_balance += amount
 
-    table.update_item( Key={'id': sender}, UpdateExpression='SET balance = :val1', ExpressionAttributeValues={':val1': sender_balance})
-    table.update_item( Key={'id': receiver}, UpdateExpression='SET balance = :val1', ExpressionAttributeValues={':val1': receiver_balance})
-    
+    # table.update_item( Key={'id': sender}, UpdateExpression='SET balance = :val1', ExpressionAttributeValues={':val1': sender_balance})
+    # table.update_item( Key={'id': receiver}, UpdateExpression='SET balance = :val1', ExpressionAttributeValues={':val1': receiver_balance})
+    client = boto3.client('dynamodb')
+    response = client.transact_write_items(
+        TransactItems=[
+            {
+                'Update': {
+                    'TableName': 'users',
+                    'Key': {
+                        'id': {'S'  : sender}
+                    },
+                    'UpdateExpression': 'SET balance = :val1',
+                    'ExpressionAttributeValues': {
+                        ':val1': {'N': str(sender_balance)}
+                    }
+                }
+            },
+            {
+                'Update': {
+                    'TableName': 'users',
+                    'Key': {
+                        'id': {'S': receiver}
+                    },
+                    'UpdateExpression': 'SET balance = :val1',
+                    'ExpressionAttributeValues': {
+                        ':val1': {'N': str(receiver_balance)}
+                    }
+                }
+            }
+        ]
+    )
+    # print(response)
     message = 'Transfered ' + str(amount) + ' from ' + sender + ' to ' + receiver + '. New balance of ' + sender + ' is ' + str(sender_balance) + ' and of ' + receiver + ' is ' + str(receiver_balance)
     return {
         'statusCode': 200,

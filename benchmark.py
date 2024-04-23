@@ -10,20 +10,20 @@ headers = {
 }
 
 # Define the users and amounts for benchmarking
-users = ['user1', 'user2', 'user3', 'user4', 'user5']
-amounts = [10]
+users = ['user1', 'user2', 'user3', 'user4']
+amounts = [1]
 
 # Number of requests to make for each combination of user and amount
 num_requests = 10
 
 latencies = []
-
+failedCount = 0
 for user in users:
     for amount in amounts:
         for _ in range(num_requests):
             data = {
                 'sender': user,
-                'receiver': 'user2',  # Assuming user2 is always the receiver
+                'receiver': 'user5',  # Assuming user2 is always the receiver
                 'amount': amount
             }
             
@@ -40,8 +40,9 @@ for user in users:
                 # print(f"Transfer successful. Latency: {latency:.4f} seconds")
                 continue
             else:
-                print(f"Transfer failed. Status code: {response.status_code}, Message: {response.text}")
-
+                # print(f"Transfer failed. Status code: {response.status_code}, Message: {response.text}")
+                failedCount += 1
+                print(f"Transfer failed for sender: {user}, amount: {amount}, Status code: {response.status_code}, Message: {response.text}")
 # Calculate average latency
 average_latency = sum(latencies) / len(latencies)
 max_latency = max(latencies)
@@ -51,3 +52,4 @@ print(f"\nAverage latency for {num_requests} requests per user with amount 10: {
 print(f"Max latency: {max_latency:.4f} seconds")
 print(f"Min latency: {min_latency:.4f} seconds")
 print(f"Standard deviation: {std_dev:.4f} seconds")
+print(f"Failed Count: {failedCount} out of {num_requests*len(users)*len(amounts)}")
