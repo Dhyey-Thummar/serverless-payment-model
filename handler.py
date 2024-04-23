@@ -31,24 +31,15 @@ def initTable(event, context):
 
     # Add some data
     table = dynamodb.Table('users')
-    table.put_item(
-        Item={
-            'id': 'user1',
-            'balance': 100
+
+    no_of_users = 10
+    for i in range(no_of_users):
+        user = {
+            'id': str(user + str(i)),
+            'balance': 1000
         }
-    )
-    table.put_item(
-        Item={
-            'id': 'user2',
-            'balance': 200
-        }
-    )
-    table.put_item(
-        Item={
-            'id': 'user3',
-            'balance': 300
-        }
-    )
+        table.put_item(Item=user)
+
     return {
         'statusCode': 200,
         'body': 'Table created'
